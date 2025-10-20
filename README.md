@@ -26,6 +26,8 @@ zig build
 Alternatively use something like this to run directly:
 ```sh
 zig build run -- /bin/ls
+# or
+zig build run -- ls
 ```
 
 This runs the tests:
@@ -44,6 +46,10 @@ passed through to the target executable.
 # Run a test executable that prints its arguments
 ./zig-out/bin/loader ./zig-out/bin/test_nolibc_pie_printArgs foo bar baz
 # Output: ./zig-out/bin/test_nolibc_pie_printArgs foo bar baz
+
+# Run echo
+./zig-out/bin/loader echo Hello There
+# Output: Hello There
 ```
 
 ## License

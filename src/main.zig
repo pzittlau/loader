@@ -39,12 +39,8 @@ pub fn main() !void {
         return;
     }
 
-    // TODO: maybe search for the file in PATH
     // Map file into memory
-    const file = try std.fs.cwd().openFile(
-        mem.sliceTo(std.os.argv[arg_index], 0),
-        .{ .mode = .read_only },
-    );
+    const file = try lookupFile(mem.sliceTo(std.os.argv[arg_index], 0));
     var buffer: [128]u8 = undefined;
     var file_reader = file.reader(&buffer);
     log.info("--- Loading executable: {s} ---", .{std.os.argv[arg_index]});
@@ -73,13 +69,15 @@ pub fn main() !void {
     };
 
     // We don't need the file anymore. But we reuse the buffer if we need to load the interpreter.
-    // Therefore deinit everything.
+    // Therefore deinit everything to make sure we don't use it anymore.
     file_reader = undefined;
     file.close();
 
     var maybe_interp_base: ?usize = null;
     var maybe_interp_entry: ?usize = null;
     if (maybe_interp) |interp| {
+        // TODO: If we have an interpreter we could/should unload the elf file because it will be
+        // loaded by the dynamic linker anyway.
         log.info("--- Loading interpreter ---", .{});
         var interp_reader = interp.reader(&buffer);
         const interp_ehdr = try elf.Header.read(&interp_reader.interface);
@@ -219,6 +217,32 @@ fn elfToMmapProt(elf_prot: u64) u32 {
     if ((elf_prot & elf.PF_W) != 0) result |= posix.PROT.WRITE;
     if ((elf_prot & elf.PF_X) != 0) result |= posix.PROT.EXEC;
     return result;
+}
+
+/// Opens the file by either opening via a (absolute or relative) path or searching through `PATH`
+/// for a file with the name.
+fn lookupFile(path_or_name: []const u8) !std.fs.File {
+    // If filename contains a slash ("/"), then it is interpreted as a pathname.
+    if (std.mem.indexOfScalarPos(u8, path_or_name, 0, '/')) |_| {
+        const fd = try posix.open(path_or_name, .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0);
+        return .{ .handle = fd };
+    }
+
+    // If it has no slash we need to look it up in PATH.
+    if (posix.getenvZ("PATH")) |env_path| {
+        var paths = std.mem.tokenizeScalar(u8, env_path, ':');
+        while (paths.next()) |p| {
+            var dir = std.fs.openDirAbsolute(p, .{}) catch continue;
+            defer dir.close();
+            const fd = posix.openat(dir.fd, path_or_name, .{
+                .ACCMODE = .RDONLY,
+                .CLOEXEC = true,
+            }, 0) catch continue;
+            return .{ .handle = fd };
+        }
+    }
+
+    return error.FileNotFound;
 }
 
 /// This function performs the final jump into the loaded program (amd64)
