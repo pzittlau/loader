@@ -260,98 +260,68 @@ fn trampoline(entry: usize, sp: [*]usize) noreturn {
 
 // TODO: make this be passed in from the build system
 const bin_path = "zig-out/bin/";
-fn getExePath(comptime name: []const u8) []const u8 {
-    return bin_path ++ name;
+fn getTestExePath(comptime name: []const u8) []const u8 {
+    return bin_path ++ "test_" ++ name;
 }
-const loader_path = getExePath("loader");
+const loader_path = bin_path ++ "loader";
 
-test "test_nolibc_nopie_exit" {
-    try testExit("test_nolibc_nopie_exit");
+test "nolibc_nopie_exit" {
+    try testHelper(&.{ loader_path, getTestExePath("nolibc_nopie_exit") }, "");
 }
-test "test_nolibc_pie_exit" {
-    try testExit("test_nolibc_pie_exit");
+test "nolibc_pie_exit" {
+    try testHelper(&.{ loader_path, getTestExePath("nolibc_pie_exit") }, "");
 }
-test "test_libc_pie_exit" {
-    try testExit("test_libc_pie_exit");
-}
-
-test "test_nolibc_nopie_helloWorld" {
-    try testHelloWorld("test_nolibc_nopie_helloWorld");
-}
-test "test_nolibc_pie_helloWorld" {
-    try testHelloWorld("test_nolibc_pie_helloWorld");
-}
-test "test_libc_pie_helloWorld" {
-    try testHelloWorld("test_libc_pie_helloWorld");
+test "libc_pie_exit" {
+    try testHelper(&.{ loader_path, getTestExePath("libc_pie_exit") }, "");
 }
 
-test "test_nolibc_nopie_printArgs" {
-    try testPrintArgs("test_nolibc_nopie_printArgs");
+test "nolibc_nopie_helloWorld" {
+    try testHelper(&.{ loader_path, getTestExePath("nolibc_nopie_helloWorld") }, "Hello World!\n");
 }
-test "test_nolibc_pie_printArgs" {
-    try testPrintArgs("test_nolibc_pie_printArgs");
+test "nolibc_pie_helloWorld" {
+    try testHelper(&.{ loader_path, getTestExePath("nolibc_pie_helloWorld") }, "Hello World!\n");
 }
-test "test_libc_pie_printArgs" {
-    try testPrintArgs("test_libc_pie_printArgs");
-}
-
-fn testExit(comptime name: []const u8) !void {
-    const exe_path = comptime getExePath(name);
-    const argv = &.{ loader_path, exe_path };
-    log.info("Running test: {s}", .{name});
-
-    const result = try std.process.Child.run(.{
-        .allocator = testing.allocator,
-        .argv = argv,
-    });
-    defer testing.allocator.free(result.stdout);
-    defer testing.allocator.free(result.stderr);
-    errdefer std.log.err("term: {}", .{result.term});
-    errdefer std.log.err("stdout: {s}", .{result.stdout});
-
-    try testing.expectEqualStrings("", result.stdout);
-    try testing.expect(result.term == .Exited);
-    try testing.expectEqual(0, result.term.Exited);
+test "libc_pie_helloWorld" {
+    try testHelper(&.{ loader_path, getTestExePath("libc_pie_helloWorld") }, "Hello World!\n");
 }
 
-fn testHelloWorld(comptime name: []const u8) !void {
-    const exe_path = comptime getExePath(name);
-    const argv = &.{ loader_path, exe_path };
-    log.info("Running test: {s}", .{name});
+test "nolibc_nopie_printArgs" {
+    try testPrintArgs("nolibc_nopie_printArgs");
+}
+test "nolibc_pie_printArgs" {
+    try testPrintArgs("nolibc_pie_printArgs");
+}
+test "libc_pie_printArgs" {
+    try testPrintArgs("libc_pie_printArgs");
+}
 
-    const result = try std.process.Child.run(.{
-        .allocator = testing.allocator,
-        .argv = argv,
-    });
-    defer testing.allocator.free(result.stdout);
-    defer testing.allocator.free(result.stderr);
-    errdefer std.log.err("term: {}", .{result.term});
-    errdefer std.log.err("stdout: {s}", .{result.stdout});
-
-    try testing.expectEqualStrings("Hello World!\n", result.stdout);
-    try testing.expect(result.term == .Exited);
-    try testing.expectEqual(0, result.term.Exited);
+test "echo" {
+    try testHelper(&.{ "echo", "Hello", "There" }, "Hello There\n");
 }
 
 fn testPrintArgs(comptime name: []const u8) !void {
-    const exe_path = comptime getExePath(name);
-    const loader_argv: []const []const u8 = &.{ loader_path, exe_path, "foo", "bar", "baz", "hi" };
+    const exe_path = getTestExePath(name);
+    const loader_argv: []const []const u8 = &.{ loader_path, exe_path, "foo", "bar", "baz hi" };
     const target_argv = loader_argv[1..];
-    log.info("Running test: {s}", .{name});
+    const expected_stout = try mem.join(testing.allocator, " ", target_argv);
+    defer testing.allocator.free(expected_stout);
+    try testHelper(loader_argv, expected_stout);
+}
 
+fn testHelper(
+    argv: []const []const u8,
+    expected_stdout: []const u8,
+) !void {
     const result = try std.process.Child.run(.{
         .allocator = testing.allocator,
-        .argv = loader_argv,
+        .argv = argv,
     });
     defer testing.allocator.free(result.stdout);
     defer testing.allocator.free(result.stderr);
     errdefer std.log.err("term: {}", .{result.term});
     errdefer std.log.err("stdout: {s}", .{result.stdout});
 
-    const expected_stout = try mem.join(testing.allocator, " ", target_argv);
-    defer testing.allocator.free(expected_stout);
-
-    try testing.expectEqualStrings(expected_stout, result.stdout);
+    try testing.expectEqualStrings(expected_stdout, result.stdout);
     try testing.expect(result.term == .Exited);
     try testing.expectEqual(0, result.term.Exited);
 }
