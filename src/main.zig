@@ -43,8 +43,8 @@ pub fn main() !void {
 
     // Map file into memory
     const file = try lookupFile(mem.sliceTo(std.os.argv[arg_index], 0));
-    var buffer: [128]u8 = undefined;
-    var file_reader = file.reader(&buffer);
+    var file_buffer: [128]u8 = undefined;
+    var file_reader = file.reader(&file_buffer);
     log(.info, "--- Loading executable: {s} ---", .{std.os.argv[arg_index]});
     const ehdr = try elf.Header.read(&file_reader.interface);
     const base = try loadStaticElf(ehdr, &file_reader);
@@ -52,36 +52,26 @@ pub fn main() !void {
     log(.info, "Executable loaded: base=0x{x}, entry=0x{x}", .{ base, entry });
 
     // Check for dynamic linker
-    const maybe_interp: ?std.fs.File = interp: {
-        var phdrs = ehdr.iterateProgramHeaders(&file_reader);
-        while (try phdrs.next()) |phdr| {
-            if (phdr.p_type != elf.PT_INTERP) continue;
-            var interp_path: [max_interp_path_length]u8 = undefined;
-            try file_reader.seekTo(phdr.p_offset);
-            if (try file_reader.read(interp_path[0..phdr.p_filesz]) != phdr.p_filesz)
-                return UnfinishedReadError.UnfinishedRead;
-            assert(interp_path[phdr.p_filesz - 1] == 0); // Must be zero terminated
-            log(.info, "Found interpreter path: {s}", .{interp_path[0 .. phdr.p_filesz - 1]});
-            break :interp try std.fs.cwd().openFile(
-                interp_path[0 .. phdr.p_filesz - 1],
-                .{ .mode = .read_only },
-            );
-        }
-        break :interp null;
-    };
-
-    // We don't need the file anymore. But we reuse the buffer if we need to load the interpreter.
-    // Therefore deinit everything to make sure we don't use it anymore.
-    file_reader = undefined;
-    file.close();
-
     var maybe_interp_base: ?usize = null;
     var maybe_interp_entry: ?usize = null;
-    if (maybe_interp) |interp| {
-        // TODO: If we have an interpreter we could/should unload the elf file because it will be
-        // loaded by the dynamic linker anyway.
+    var phdrs = ehdr.iterateProgramHeaders(&file_reader);
+    while (try phdrs.next()) |phdr| {
+        if (phdr.p_type != elf.PT_INTERP) continue;
+
+        var interp_path: [max_interp_path_length]u8 = undefined;
+        try file_reader.seekTo(phdr.p_offset);
+        if (try file_reader.read(interp_path[0..phdr.p_filesz]) != phdr.p_filesz)
+            return UnfinishedReadError.UnfinishedRead;
+        assert(interp_path[phdr.p_filesz - 1] == 0); // Must be zero terminated
+        log(.info, "Found interpreter path: {s}", .{interp_path[0 .. phdr.p_filesz - 1]});
+        const interp = try std.fs.cwd().openFile(
+            interp_path[0 .. phdr.p_filesz - 1],
+            .{ .mode = .read_only },
+        );
+
         log(.info, "--- Loading interpreter ---", .{});
-        var interp_reader = interp.reader(&buffer);
+        var interp_buffer: [128]u8 = undefined;
+        var interp_reader = interp.reader(&interp_buffer);
         const interp_ehdr = try elf.Header.read(&interp_reader.interface);
         assert(interp_ehdr.type == elf.ET.DYN);
         const interp_base = try loadStaticElf(interp_ehdr, &interp_reader);
