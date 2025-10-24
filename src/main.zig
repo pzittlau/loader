@@ -1,3 +1,4 @@
+const faller = @import("faller");
 const std = @import("std");
 
 const elf = std.elf;
@@ -5,10 +6,11 @@ const mem = std.mem;
 const posix = std.posix;
 const testing = std.testing;
 
-const assert = std.debug.assert;
+pub const faller_options: faller.Options = .{ .tags_disabled = &.{.debug} };
+const Logger = faller.Logger(&.{.loader});
 
-const log = std.log.scoped(.loader);
-pub const std_options = std.Options{ .log_level = .info };
+const assert = std.debug.assert;
+const log = Logger.log;
 
 const page_size = std.heap.pageSize();
 const max_interp_path_length = 128;
@@ -43,11 +45,11 @@ pub fn main() !void {
     const file = try lookupFile(mem.sliceTo(std.os.argv[arg_index], 0));
     var buffer: [128]u8 = undefined;
     var file_reader = file.reader(&buffer);
-    log.info("--- Loading executable: {s} ---", .{std.os.argv[arg_index]});
+    log(.info, "--- Loading executable: {s} ---", .{std.os.argv[arg_index]});
     const ehdr = try elf.Header.read(&file_reader.interface);
     const base = try loadStaticElf(ehdr, &file_reader);
     const entry = ehdr.entry + if (ehdr.type == .DYN) base else 0;
-    log.info("Executable loaded: base=0x{x}, entry=0x{x}", .{ base, entry });
+    log(.info, "Executable loaded: base=0x{x}, entry=0x{x}", .{ base, entry });
 
     // Check for dynamic linker
     const maybe_interp: ?std.fs.File = interp: {
@@ -59,7 +61,7 @@ pub fn main() !void {
             if (try file_reader.read(interp_path[0..phdr.p_filesz]) != phdr.p_filesz)
                 return UnfinishedReadError.UnfinishedRead;
             assert(interp_path[phdr.p_filesz - 1] == 0); // Must be zero terminated
-            log.info("Found interpreter path: {s}", .{interp_path[0 .. phdr.p_filesz - 1]});
+            log(.info, "Found interpreter path: {s}", .{interp_path[0 .. phdr.p_filesz - 1]});
             break :interp try std.fs.cwd().openFile(
                 interp_path[0 .. phdr.p_filesz - 1],
                 .{ .mode = .read_only },
@@ -78,14 +80,14 @@ pub fn main() !void {
     if (maybe_interp) |interp| {
         // TODO: If we have an interpreter we could/should unload the elf file because it will be
         // loaded by the dynamic linker anyway.
-        log.info("--- Loading interpreter ---", .{});
+        log(.info, "--- Loading interpreter ---", .{});
         var interp_reader = interp.reader(&buffer);
         const interp_ehdr = try elf.Header.read(&interp_reader.interface);
         assert(interp_ehdr.type == elf.ET.DYN);
         const interp_base = try loadStaticElf(interp_ehdr, &interp_reader);
         maybe_interp_base = interp_base;
         maybe_interp_entry = interp_ehdr.entry + if (interp_ehdr.type == .DYN) interp_base else 0;
-        log.info("Interpreter loaded: base=0x{x}, entry=0x{x}", .{ interp_base, maybe_interp_entry.? });
+        log(.info, "Interpreter loaded: base=0x{x}, entry=0x{x}", .{ interp_base, maybe_interp_entry.? });
         interp.close();
     }
 
@@ -113,7 +115,8 @@ pub fn main() !void {
     const dest_ptr = @as([*]u8, @ptrCast(std.os.argv.ptr));
     const src_ptr = @as([*]u8, @ptrCast(&std.os.argv[arg_index]));
     const len = @intFromPtr(end_of_auxv) - @intFromPtr(src_ptr);
-    log.debug(
+    log(
+        .debug,
         "Copying stack from {*} to {*} with length 0x{x}",
         .{ src_ptr, dest_ptr, len },
     );
@@ -124,10 +127,10 @@ pub fn main() !void {
     // start of the stack.
     const argc: [*]usize = @as([*]usize, @ptrCast(@alignCast(&std.os.argv.ptr[0]))) - 1;
     argc[0] = std.os.argv.len - arg_index;
-    log.debug("new argc: {x}", .{argc[0]});
+    log(.debug, "new argc: {x}", .{argc[0]});
 
     const final_entry = maybe_interp_entry orelse entry;
-    log.info("Trampolining to final entry: 0x{x} with sp: {*}", .{ final_entry, argc });
+    log(.info, "Trampolining to final entry: 0x{x} with sp: {*}", .{ final_entry, argc });
     trampoline(final_entry, argc);
 }
 
@@ -153,15 +156,15 @@ fn loadStaticElf(ehdr: elf.Header, file_reader: *std.fs.File.Reader) !usize {
         }
         minva = mem.alignBackward(usize, minva, page_size);
         maxva = mem.alignForward(usize, maxva, page_size);
-        log.debug("Calculated bounds: minva=0x{x}, maxva=0x{x}", .{ minva, maxva });
+        log(.debug, "Calculated bounds: minva=0x{x}, maxva=0x{x}", .{ minva, maxva });
         break :bounds .{ minva, maxva };
     };
 
     // Check, that the needed memory region can be allocated as a whole. We do this
     const dynamic = ehdr.type == elf.ET.DYN;
-    log.debug("ELF type is {s}", .{if (dynamic) "DYN" else "EXEC (static)"});
+    log(.debug, "ELF type is {s}", .{if (dynamic) "DYN" else "EXEC (static)"});
     const hint = if (dynamic) null else @as(?[*]align(page_size) u8, @ptrFromInt(minva));
-    log.debug("mmap pre-flight hint: {*}", .{hint});
+    log(.debug, "mmap pre-flight hint: {*}", .{hint});
     const base = try posix.mmap(
         hint,
         maxva - minva,
@@ -170,7 +173,7 @@ fn loadStaticElf(ehdr: elf.Header, file_reader: *std.fs.File.Reader) !usize {
         -1,
         0,
     );
-    log.debug("Pre-flight reservation successful at: {*}, size: 0x{x}", .{ base.ptr, base.len });
+    log(.debug, "Pre-flight reservation successful at: {*}, size: 0x{x}", .{ base.ptr, base.len });
     posix.munmap(base);
 
     const flags = posix.MAP{ .TYPE = .PRIVATE, .ANONYMOUS = true, .FIXED = true };
@@ -186,7 +189,8 @@ fn loadStaticElf(ehdr: elf.Header, file_reader: *std.fs.File.Reader) !usize {
         var start = mem.alignBackward(usize, phdr.p_vaddr, page_size);
         const base_for_dyn = if (dynamic) @intFromPtr(base.ptr) else 0;
         start += base_for_dyn;
-        log.debug(
+        log(
+            .debug,
             "  - phdr[{}]: mapping 0x{x} bytes at 0x{x} (vaddr=0x{x}, dyn_base=0x{x})",
             .{ phdr_idx, size, start, phdr.p_vaddr, base_for_dyn },
         );
@@ -206,7 +210,7 @@ fn loadStaticElf(ehdr: elf.Header, file_reader: *std.fs.File.Reader) !usize {
             return UnfinishedReadError.UnfinishedRead;
         try posix.mprotect(ptr, elfToMmapProt(phdr.p_flags));
     }
-    log.debug("loadElf returning base: 0x{x}", .{@intFromPtr(base.ptr)});
+    log(.debug, "loadElf returning base: 0x{x}", .{@intFromPtr(base.ptr)});
     return @intFromPtr(base.ptr);
 }
 
@@ -318,8 +322,8 @@ fn testHelper(
     });
     defer testing.allocator.free(result.stdout);
     defer testing.allocator.free(result.stderr);
-    errdefer std.log.err("term: {}", .{result.term});
-    errdefer std.log.err("stdout: {s}", .{result.stdout});
+    errdefer log(.err, "term: {}", .{result.term});
+    errdefer log(.err, "stdout: {s}", .{result.stdout});
 
     try testing.expectEqualStrings(expected_stdout, result.stdout);
     try testing.expect(result.term == .Exited);

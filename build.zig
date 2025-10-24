@@ -42,17 +42,20 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    try compileTestApplications(b, target, optimize, false, false);
-    try compileTestApplications(b, target, optimize, false, true);
-    try compileTestApplications(b, target, optimize, true, true);
+    const faller = b.dependency("faller", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
-    const mod = b.addModule("loader", .{
+    const mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .optimize = optimize,
         .target = target,
         .link_libc = false,
         .link_libcpp = false,
     });
+    mod.addImport("faller", faller.module("faller"));
+
     const exe = b.addExecutable(.{
         .name = "loader",
         .root_module = mod,
@@ -67,6 +70,10 @@ pub fn build(b: *std.Build) !void {
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
+
+    try compileTestApplications(b, target, optimize, false, false);
+    try compileTestApplications(b, target, optimize, false, true);
+    try compileTestApplications(b, target, optimize, true, true);
 
     const exe_tests = b.addTest(.{ .root_module = mod });
     const run_exe_tests = b.addRunArtifact(exe_tests);

@@ -1,6 +1,12 @@
 .{
     .name = .loader,
     .version = "0.0.1",
+    .dependencies = .{
+        .faller = .{
+            .url = "git+https://git.pascalzittlau.de/pzittlau/faller.git#2dea92dcd9184c3a37f07761009944bc8fd4d352",
+            .hash = "faller-0.1.0-nNGNDT07AADmPJe_o0ERuMpZJGgXbdb_5B7VAMs2SmEt",
+        },
+    },
     .minimum_zig_version = "0.15.1",
     .paths = .{""},
     .fingerprint = 0xbf53f276a39b2af9,
