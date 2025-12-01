@@ -96,7 +96,7 @@ pub fn main() !void {
     const src_ptr = @as([*]u8, @ptrCast(&std.os.argv[arg_index]));
     const len = @intFromPtr(end_of_auxv) - @intFromPtr(src_ptr);
     assert(@intFromPtr(dest_ptr) < @intFromPtr(src_ptr));
-    std.mem.copyForwards(u8, dest_ptr[0..len], src_ptr[0..len]);
+    @memmove(dest_ptr[0..len], src_ptr[0..len]);
 
     // `std.os.argv.ptr` points to the argv pointers. The word just before it is argc and also the
     // start of the stack.

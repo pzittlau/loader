@@ -32,6 +32,8 @@ pub fn compileTestApplications(
                 .pic = pie,
             }),
             .linkage = if (link_libc) .dynamic else .static,
+            .use_llvm = true,
+            .use_lld = true,
         });
         test_executable.pie = pie;
         b.installArtifact(test_executable);
