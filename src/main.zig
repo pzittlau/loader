@@ -138,18 +138,15 @@ fn loadStaticElf(ehdr: elf.Header, file_reader: *std.fs.File.Reader) !usize {
     const base = try posix.mmap(
         hint,
         maxva - minva,
-        posix.PROT.NONE,
-        .{ .TYPE = .PRIVATE, .ANONYMOUS = true, .FIXED = !dynamic },
+        posix.PROT.WRITE,
+        .{ .TYPE = .PRIVATE, .ANONYMOUS = true, .FIXED_NOREPLACE = !dynamic },
         -1,
         0,
     );
-    posix.munmap(base);
 
-    const flags = posix.MAP{ .TYPE = .PRIVATE, .ANONYMOUS = true, .FIXED = true };
     var phdrs = ehdr.iterateProgramHeaders(file_reader);
-    var phdr_idx: u32 = 0;
     errdefer posix.munmap(base);
-    while (try phdrs.next()) |phdr| : (phdr_idx += 1) {
+    while (try phdrs.next()) |phdr| {
         if (phdr.p_type != elf.PT_LOAD) continue;
         if (phdr.p_memsz == 0) continue;
 
@@ -158,17 +155,7 @@ fn loadStaticElf(ehdr: elf.Header, file_reader: *std.fs.File.Reader) !usize {
         var start = mem.alignBackward(usize, phdr.p_vaddr, page_size);
         const base_for_dyn = if (dynamic) @intFromPtr(base.ptr) else 0;
         start += base_for_dyn;
-        // NOTE: We can't use a single file-backed mmap for the segment, because p_memsz may be
-        // larger than p_filesz. This difference accounts for the .bss section, which must be
-        // zero-initialized.
-        const ptr = try posix.mmap(
-            @as(?[*]align(page_size) u8, @ptrFromInt(start)),
-            size,
-            posix.PROT.WRITE,
-            flags,
-            -1,
-            0,
-        );
+        const ptr: []align(page_size) u8 = @as([*]align(page_size) u8, @ptrFromInt(start))[0..size];
         try file_reader.seekTo(phdr.p_offset);
         if (try file_reader.read(ptr[offset..][0..phdr.p_filesz]) != phdr.p_filesz)
             return UnfinishedReadError.UnfinishedRead;
